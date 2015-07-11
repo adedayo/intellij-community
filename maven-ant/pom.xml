@@ -1,0 +1,51 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.github.adedayo.intellij.sdk</groupId>
+    <artifactId>intellij-sdk-ant-builder</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <name>intellij-sdk-ant-builder</name>
+    <url>http://www.jetbrains.com/idea</url>
+
+    <parent>
+        <groupId>com.github.adedayo.intellij.sdk</groupId>
+        <artifactId>intellij-sdk</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../</relativePath>
+    </parent>
+
+    <properties>
+        <scala.version>2.11.4</scala.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <!--Build intelliJ with ant using the bundled build.xml-->
+            <plugin>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>1.8</version>
+                <executions>
+
+                    <execution>
+
+                        <id>build-id</id>
+                        <phase>prepare-package</phase>
+
+                        <configuration>
+                            <exportAntProperties>true</exportAntProperties>
+                            <target>
+                                <property name="main.basedir" location="./.."/>
+                                <echo message="main.basedir=${main.basedir}"/>
+                                <ant antfile="build.xml" target="build" dir="${main.basedir}"></ant>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
