@@ -1,4 +1,4 @@
-# More modular Intellij CE SDK components
+# More modular IntelliJ CE SDK components
 ## Motivation
  
  The idea of this fork of the IntelliJ IDEA Community Edition is to provide scripts to build various components of IntelliJ
