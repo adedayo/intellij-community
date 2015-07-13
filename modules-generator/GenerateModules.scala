@@ -1,10 +1,11 @@
 import java.io.File
-import java.nio.file.attribute.BasicFileAttributes
+import java.net.URI
 import java.nio.file._
-import java.util.Collections
+import java.nio.file.attribute.BasicFileAttributes
 
 import org.apache.maven.shared.invoker.{DefaultInvocationRequest, DefaultInvoker}
 
+import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.xml.XML
 
@@ -13,6 +14,8 @@ import scala.xml.XML
  *
  */
 
+
+val release = 1
 val directories = List("ByteCodeViewer",
   "IntelliLang",
   "IntelliLang-java",
@@ -252,11 +255,70 @@ val directories = List("ByteCodeViewer",
   "xslt-debugger-engine",
   "xslt-debugger-engine-impl",
   "xslt-rt")
+val bundledLibraries = List(
+  ("asm-all", "asm5-src.zip"),
+  ("trove4j", "trove4j_src.jar")
+)
+bundledLibraries.foreach(lib => {
+  val (name, archiveName) = lib
+  buildBundledLibrary(name, archiveName)
+})
 
+var classToSourceMap = Map[Path, Path]()
 setupProjects
+mapSources
 invokeBuild
 
+
+
+def buildBundledLibrary(name:String,archiveName:String) = {
+  val srcPath = Paths.get(s"lib/src/$archiveName").toAbsolutePath
+  val srcDir = Paths.get(s"out_maven/$name/src/main/java")
+  if (Files.exists(srcDir)) {
+    delete(srcDir.toFile)
+    Files.createDirectories(srcDir)
+  } else {
+    Files.createDirectories(srcDir)
+  }
+  import scala.collection.JavaConversions._
+  val zipFS = FileSystems.newFileSystem(URI.create("jar:file:" + srcPath.toUri.getPath), Map[String, String]())
+  Files.walkFileTree(zipFS.getPath("/"), new SimpleFileVisitor[Path] {
+
+    override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) = {
+      val dirToCreate = Paths.get(srcDir.toString, dir.toString)
+      if (Files.notExists(dirToCreate)) {
+        Files.createDirectory(dirToCreate);
+      }
+      FileVisitResult.CONTINUE
+    }
+
+    override def visitFile(file: Path, attr: BasicFileAttributes) = {
+      val destFile = Paths.get(srcDir.toString, file.toString)
+      Files.copy(file, destFile, StandardCopyOption.REPLACE_EXISTING);
+      FileVisitResult.CONTINUE
+    }
+
+  })
+
+  XML.save(s"out_maven/$name/pom.xml", generatePOM(name))
+
+  val invoker = new DefaultInvoker
+  val request = new DefaultInvocationRequest
+  request.setPomFile(new File(s"out_maven/$name/pom.xml"))
+  import scala.collection.JavaConversions._
+  val goals = List("compile",
+    "org.apache.maven.plugins:maven-jar-plugin:jar",
+    "org.apache.maven.plugins:maven-source-plugin:jar-no-fork",
+    "org.apache.maven.plugins:maven-javadoc-plugin:jar",
+    "org.apache.maven.plugins:maven-gpg-plugin:sign",
+    "org.apache.maven.plugins:maven-install-plugin:2.3.1:install"
+  )
+  request.setGoals(goals)
+  invoker.execute(request)
+}
+
 def setupProjects = {
+  println("Setting up ...")
   directories.par.foreach(dir => {
     val destination = s"out/classes/production/$dir"
     val target = Paths.get(s"out_maven/$dir/target/classes")
@@ -284,88 +346,243 @@ def delete(file: File): Unit = {
 }
 
 def generatePOM(project: String, version: String = Source.fromFile("build.txt").getLines.next) = {
-
+  val branch = version.replace(".SNAPSHOT", "")
   val pom =
-    <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-             xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
-      <modelVersion>4.0.0</modelVersion>
-      <groupId>com.github.adedayo.intellij.sdk</groupId>
-      <artifactId>{project}</artifactId>
-      <version>{version.replace(".SNAPSHOT", "-SNAPSHOT")}</version>
-      <packaging>jar</packaging>
-      <name>{project}</name>
-      <url>http://www.jetbrains.com/idea</url>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.github.adedayo.intellij.sdk</groupId>
+  <artifactId>{project}</artifactId>
+  <version>{branch}.{release}</version>
+  <packaging>jar</packaging>
+  <name>{project}</name>
+  <url>http://www.jetbrains.com/idea</url>
+  <description>A packaging of the IntelliJ Community Edition {project} library.
+  This is release number {release} of trunk branch {branch}.
+  </description>
 
-      <licenses>
-        <license>
-          <name>Apache License, Version 2.0</name>
-          <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
-        </license>
-      </licenses>
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
 
-      <scm><connection>scm:git:git@github.com:adedayo/intellij-community.git</connection></scm>
 
-      <distributionManagement>
-        <snapshotRepository>
-          <id>ossrh</id>
-          <url>https://oss.sonatype.org/content/repositories/snapshots</url>
-        </snapshotRepository>
-        <repository>
-          <id>ossrh</id>
-          <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-        </repository>
-      </distributionManagement>
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.javadoc.failOnError>false</maven.javadoc.failOnError>
+  </properties>
 
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-source-plugin</artifactId>
-            <version>2.2.1</version>
-            <executions>
-              <execution>
-                <id>attach-sources</id>
-                <goals>
-                  <goal>jar-no-fork</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <version>2.9.1</version>
-            <executions>
-              <execution>
-                <id>attach-javadocs</id>
-                <goals>
-                  <goal>jar</goal>
-                </goals>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
+  <developers>
+    <developer>
+      <id>adedayo</id>
+      <name>Adedayo Adetoye</name>
+      <email>dayo.dev@gmail.com</email>
+    </developer>
+  </developers>
 
-    </project>
+  <scm>
+    <connection>scm:git:git@github.com:adedayo/intellij-community.git</connection>
+    <developerConnection>scm:git:git@github.com:adedayo/intellij-community.git</developerConnection>
+    <url>https://github.com/adedayo/intellij-community.git</url>
+  </scm>
+
+  <distributionManagement>
+    <snapshotRepository>
+      <id>ossrh</id>
+      <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+    </snapshotRepository>
+    <repository>
+      <id>ossrh</id>
+      <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+    </repository>
+  </distributionManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>2.6</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>2.4</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>2.10.3</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <version>1.6</version>
+        <executions>
+          <execution>
+            <id>sign-artifacts</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>sign</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.sonatype.plugins</groupId>
+        <artifactId>nexus-staging-maven-plugin</artifactId>
+        <version>1.6.5</version>
+        <extensions>true</extensions>
+        <configuration>
+          <serverId>ossrh</serverId>
+          <nexusUrl>https://oss.sonatype.org/</nexusUrl>
+          <autoReleaseAfterClose>true</autoReleaseAfterClose>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+
   pom
-
 }
 
 def invokeBuild = {
-
+  println("Packaging Projects ...")
   directories.par.foreach(dir => {
     val invoker = new DefaultInvoker
     val request = new DefaultInvocationRequest
     request.setPomFile(new File(s"out_maven/$dir/pom.xml"))
-    request.setGoals(Collections.singletonList("package"))
+    import scala.collection.JavaConversions._
+    val goals = List("org.apache.maven.plugins:maven-jar-plugin:jar",
+      "org.apache.maven.plugins:maven-source-plugin:jar-no-fork",
+      "org.apache.maven.plugins:maven-javadoc-plugin:jar",
+    "org.apache.maven.plugins:maven-gpg-plugin:sign",
+    "org.apache.maven.plugins:maven-install-plugin:2.3.1:install"
+    )
+    request.setGoals(goals)
     invoker.execute(request)
   })
 }
 
+def mapSources = {
+
+  val classPaths = directories.map(dir=>{Paths.get(s"out_maven/$dir/target/classes")})
+  val classes = findJavaClasses(classPaths: _*).filter(!_.toString.contains("$"))
+  val sourcePath = Paths.get("")
+  val sources = findJavaAndGroovySources(sourcePath)
+
+  var sourceMap = Map[String, Path]()
+  val pkg = "\\s*package\\s+(.*)".r
+  sources.foreach(src => {
+    try {
+      val file = Source.fromFile(src.toFile)
+      val package_ = file.getLines.find(line => line.matches("\\s*package\\s+.*")) match {
+        case Some(line) => {
+          val pkg(data) = line
+          data
+        }
+        case None => ""
+      }
+      file.close
+      val name = package_.trim.replace('.', '/').replaceAll(";","")
+      if(!name.isEmpty) {
+       sourceMap.synchronized({
+         val fileName = src.getFileName.toString
+         if (fileName.endsWith(".java"))
+           sourceMap += ((name + "/" + fileName.dropRight(5), src))
+         else if (fileName.endsWith(".groovy"))
+           sourceMap += ((name + "/" + fileName.dropRight(7), src))
+         else
+           sourceMap += ((name + "/" + fileName, src))
+       })
+      }
+    } catch {
+      case ex: Throwable =>println(ex.getMessage + " in " + src)
+    }
+  })
+
+  classes.foreach(cls => {
+    val path = cls.toString.dropRight(6).replaceFirst(".*/target/classes/","")
+    try {
+      classToSourceMap += ((cls, sourceMap(path)))
+    }catch{
+      case ex:Throwable =>
+  }
+  })
+
+  directories.par.foreach(dir => {
+    val classes = findJavaClasses(Paths.get(s"out_maven/$dir/target/classes")).filter(!_.toString.contains("$"))
+    classes.par.foreach(clz => {
+      val parent = clz.toString.replaceFirst(".*/target/classes/", "")
+      val index = parent.lastIndexOf('.')
+      val path = if (index > 0) parent.substring(0, index) else parent.dropRight(6)
+      try {
+        if (sourceMap.contains(path)) {
+          val indx = path.lastIndexOf('/')
+
+          val target = Paths.get(s"out_maven/$dir/src/main/java/${path.substring(0, indx)}")
+          if (!Files.exists(target)) {
+            Files.createDirectories(target)
+          }
+          val file = sourceMap(path)
+          val src = file.getParent
+          println(s"Copying file $file")
+          Files.copy(file, target.resolve(src.relativize(file)), StandardCopyOption.REPLACE_EXISTING)
+        }
+      } catch {
+        case ex: Throwable =>
+      }
+    })
+  })
+}
+
+def findJavaClasses(paths: Path*): List[Path] = {
+  find(paths: _*)("glob:*.class")
+}
+
+def findJavaAndGroovySources(paths: Path*): List[Path] = {
+  find(paths: _*)("glob:*.{java,groovy}")
+}
+
+def find(paths: Path*)(glob: String): List[Path] = {
+  val files = ListBuffer[Path]()
+  def append(name: Path): Unit = files.synchronized {
+    files += name
+  }
+  paths.par.foreach(path => Files.walkFileTree(path, new FileFinder(append)(glob)(FileSystems.getDefault)))
+  files.toList
+}
+
+class FileFinder(callback: Path => Unit)(ext: String)(fileSystem: FileSystem = FileSystems.getDefault)
+  extends SimpleFileVisitor[Path] {
+  val matcher = fileSystem.getPathMatcher(ext)
+
+  override def visitFile(path: Path, attr: BasicFileAttributes): FileVisitResult = {
+    val name = path.getFileName
+    if (name != null && matcher.matches(name)) callback(path)
+    FileVisitResult.CONTINUE
+  }
+}
 
 class CopyDirVisitor(src: Path, dest: Path) extends SimpleFileVisitor[Path] {
-
   override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) = {
     val target = dest.resolve(src.relativize(dir))
     println("Copying files to " + dest)
@@ -377,6 +594,4 @@ class CopyDirVisitor(src: Path, dest: Path) extends SimpleFileVisitor[Path] {
     Files.copy(file, dest.resolve(src.relativize(file)), StandardCopyOption.REPLACE_EXISTING)
     FileVisitResult.CONTINUE
   }
-
-
 }

@@ -8,3 +8,5 @@ tools that do not require the full IDE environment as dependency.
 This may pave way for future headless tools and libraries that can run outside of the InteliJ IDE, providing many of the 
   awesome goodness of the IntelliJ SDK and plugins in custom headless IDE-independent tools. 
 
+## Build and deploy
+ To build and deploy, just issue *mvn package*
