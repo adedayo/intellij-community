@@ -16,7 +16,8 @@ import scala.xml.XML
 
 
 val release = 1
-val directories = List("ByteCodeViewer",
+val directories = List(
+  "ByteCodeViewer",
   "IntelliLang",
   "IntelliLang-java",
   "IntelliLang-python",
@@ -254,7 +255,8 @@ val directories = List("ByteCodeViewer",
   "xslt-debugger",
   "xslt-debugger-engine",
   "xslt-debugger-engine-impl",
-  "xslt-rt")
+  "xslt-rt"
+)
 val bundledLibraries = List(
   ("asm-all", "asm5-src.zip"),
   ("trove4j", "trove4j_src.jar")
@@ -271,7 +273,7 @@ invokeBuild
 
 
 
-def buildBundledLibrary(name:String,archiveName:String) = {
+def buildBundledLibrary(name: String, archiveName: String) = {
   val srcPath = Paths.get(s"lib/src/$archiveName").toAbsolutePath
   val srcDir = Paths.get(s"out_maven/$name/src/main/java")
   if (Files.exists(srcDir)) {
@@ -311,7 +313,8 @@ def buildBundledLibrary(name:String,archiveName:String) = {
     "org.apache.maven.plugins:maven-source-plugin:jar-no-fork",
     "org.apache.maven.plugins:maven-javadoc-plugin:jar",
     "org.apache.maven.plugins:maven-gpg-plugin:sign",
-    "org.apache.maven.plugins:maven-install-plugin:2.3.1:install"
+    "org.apache.maven.plugins:maven-install-plugin:2.3.1:install",
+    "org.apache.maven.plugins:maven-deploy-plugin:2.8.2:deploy"
   )
   request.setGoals(goals)
   invoker.execute(request)
@@ -474,8 +477,9 @@ def invokeBuild = {
     val goals = List("org.apache.maven.plugins:maven-jar-plugin:jar",
       "org.apache.maven.plugins:maven-source-plugin:jar-no-fork",
       "org.apache.maven.plugins:maven-javadoc-plugin:jar",
-    "org.apache.maven.plugins:maven-gpg-plugin:sign",
-    "org.apache.maven.plugins:maven-install-plugin:2.3.1:install"
+      "org.apache.maven.plugins:maven-gpg-plugin:sign",
+      "org.apache.maven.plugins:maven-install-plugin:2.3.1:install",
+      "org.apache.maven.plugins:maven-deploy-plugin:2.8.2:deploy"
     )
     request.setGoals(goals)
     invoker.execute(request)
@@ -484,7 +488,9 @@ def invokeBuild = {
 
 def mapSources = {
 
-  val classPaths = directories.map(dir=>{Paths.get(s"out_maven/$dir/target/classes")})
+  val classPaths = directories.map(dir => {
+    Paths.get(s"out_maven/$dir/target/classes")
+  })
   val classes = findJavaClasses(classPaths: _*).filter(!_.toString.contains("$"))
   val sourcePath = Paths.get("")
   val sources = findJavaAndGroovySources(sourcePath)
@@ -502,30 +508,30 @@ def mapSources = {
         case None => ""
       }
       file.close
-      val name = package_.trim.replace('.', '/').replaceAll(";","")
-      if(!name.isEmpty) {
-       sourceMap.synchronized({
-         val fileName = src.getFileName.toString
-         if (fileName.endsWith(".java"))
-           sourceMap += ((name + "/" + fileName.dropRight(5), src))
-         else if (fileName.endsWith(".groovy"))
-           sourceMap += ((name + "/" + fileName.dropRight(7), src))
-         else
-           sourceMap += ((name + "/" + fileName, src))
-       })
+      val name = package_.trim.replace('.', '/').replaceAll(";", "")
+      if (!name.isEmpty) {
+        sourceMap.synchronized({
+          val fileName = src.getFileName.toString
+          if (fileName.endsWith(".java"))
+            sourceMap += ((name + "/" + fileName.dropRight(5), src))
+          else if (fileName.endsWith(".groovy"))
+            sourceMap += ((name + "/" + fileName.dropRight(7), src))
+          else
+            sourceMap += ((name + "/" + fileName, src))
+        })
       }
     } catch {
-      case ex: Throwable =>println(ex.getMessage + " in " + src)
+      case ex: Throwable => println(ex.getMessage + " in " + src)
     }
   })
 
   classes.foreach(cls => {
-    val path = cls.toString.dropRight(6).replaceFirst(".*/target/classes/","")
+    val path = cls.toString.dropRight(6).replaceFirst(".*/target/classes/", "")
     try {
       classToSourceMap += ((cls, sourceMap(path)))
-    }catch{
-      case ex:Throwable =>
-  }
+    } catch {
+      case ex: Throwable =>
+    }
   })
 
   directories.par.foreach(dir => {
