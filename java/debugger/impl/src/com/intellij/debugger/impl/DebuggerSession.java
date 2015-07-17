@@ -38,6 +38,9 @@ import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.idea.ActionsBundle;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationListener;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
@@ -60,6 +63,7 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.xdebugger.AbstractDebuggerSession;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XSourcePosition;
+import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.actions.XDebuggerActions;
 import com.intellij.xdebugger.impl.evaluate.quick.common.ValueLookupManager;
 import com.sun.jdi.ObjectCollectedException;
@@ -70,6 +74,7 @@ import com.sun.jdi.request.StepRequest;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.event.HyperlinkEvent;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -119,7 +124,10 @@ public class DebuggerSession implements AbstractDebuggerSession {
   }
 
   public boolean setSteppingThrough(ThreadReferenceProxyImpl threadProxy) {
-    return mySteppingThroughThreads.add(threadProxy);
+    if (threadProxy != null) {
+      return mySteppingThroughThreads.add(threadProxy);
+    }
+    return false;
   }
 
   @NotNull
@@ -269,7 +277,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
   public void stepOut(int stepSize) {
     final SuspendContextImpl suspendContext = getSuspendContext();
     final DebugProcessImpl.ResumeCommand cmd = myDebugProcess.createStepOutCommand(suspendContext, stepSize);
-    mySteppingThroughThreads.add(cmd.getContextThread());
+    setSteppingThrough(cmd.getContextThread());
     resumeAction(cmd, EVENT_STEP);
   }
 
@@ -280,7 +288,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
   public void stepOver(boolean ignoreBreakpoints, int stepSize) {
     final SuspendContextImpl suspendContext = getSuspendContext();
     final DebugProcessImpl.ResumeCommand cmd = myDebugProcess.createStepOverCommand(suspendContext, ignoreBreakpoints, stepSize);
-    mySteppingThroughThreads.add(cmd.getContextThread());
+    setSteppingThrough(cmd.getContextThread());
     resumeAction(cmd, EVENT_STEP);
   }
 
@@ -291,7 +299,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
   public void stepInto(final boolean ignoreFilters, final @Nullable MethodFilter smartStepFilter, int stepSize) {
     final SuspendContextImpl suspendContext = getSuspendContext();
     final DebugProcessImpl.ResumeCommand cmd = myDebugProcess.createStepIntoCommand(suspendContext, ignoreFilters, smartStepFilter, stepSize);
-    mySteppingThroughThreads.add(cmd.getContextThread());
+    setSteppingThrough(cmd.getContextThread());
     resumeAction(cmd, EVENT_STEP);
   }
 
@@ -302,7 +310,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
   public void runToCursor(@NotNull XSourcePosition position, final boolean ignoreBreakpoints) {
     try {
       DebugProcessImpl.ResumeCommand runToCursorCommand = myDebugProcess.createRunToCursorCommand(getSuspendContext(), position, ignoreBreakpoints);
-      mySteppingThroughThreads.add(runToCursorCommand.getContextThread());
+      setSteppingThrough(runToCursorCommand.getContextThread());
       resumeAction(runToCursorCommand, EVENT_STEP);
     }
     catch (EvaluateException e) {
@@ -448,6 +456,37 @@ public class DebuggerSession implements AbstractDebuggerSession {
             getContextManager().fireStateChanged(getContextManager().getContext(), EVENT_THREADS_REFRESH);
           }
         });
+        final ThreadReferenceProxyImpl thread = suspendContext.getThread();
+        if (thread != null) {
+          List<Pair<Breakpoint, Event>> descriptors = DebuggerUtilsEx.getEventDescriptors(suspendContext);
+          if (!descriptors.isEmpty()) {
+            XDebugSessionImpl.NOTIFICATION_GROUP.createNotification(
+              DebuggerBundle.message("status.breakpoint.reached.in.thread", thread.name()),
+              DebuggerBundle.message("status.breakpoint.reached.in.thread.switch"),
+              NotificationType.INFORMATION, new NotificationListener() {
+                @Override
+                public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
+                  if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                    notification.expire();
+                    getProcess().getManagerThread().schedule(new SuspendContextCommandImpl(suspendContext) {
+                      @Override
+                      public void contextAction() throws Exception {
+                        final DebuggerContextImpl debuggerContext =
+                          DebuggerContextImpl.createDebuggerContext(DebuggerSession.this, suspendContext, thread, null);
+
+                        DebuggerInvocationUtil.invokeLater(getProject(), new Runnable() {
+                          @Override
+                          public void run() {
+                            getContextManager().setState(debuggerContext, STATE_PAUSED, EVENT_PAUSE, null);
+                          }
+                        });
+                      }
+                    });
+                  }
+                }
+              }).notify(getProject());
+          }
+        }
         return;
       }
 

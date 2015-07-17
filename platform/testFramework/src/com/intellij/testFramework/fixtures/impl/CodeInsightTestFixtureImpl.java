@@ -143,7 +143,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
 
   private final TempDirTestFixture myTempDirFixture;
   protected final IdeaProjectTestFixture myProjectFixture;
-  private final FileTreeAccessFilter myJavaFilesFilter = new FileTreeAccessFilter();
+  private VirtualFileFilter myVirtualFileFilter = new FileTreeAccessFilter();
   private boolean myAllowDirt;
   private boolean myCaresAboutInjection = true;
 
@@ -462,6 +462,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
                                                                            @NotNull final InspectionToolWrapper... toolWrappers) {
     final InspectionProfileImpl profile = InspectionProfileImpl.createSimple("test", project, toolWrappers);
     GlobalInspectionContextForTests context = new GlobalInspectionContextForTests(project, inspectionManager.getContentManager()) {
+      @NotNull
       @Override
       protected List<Tools> getUsedTools() {
         return InspectionProfileImpl.initAndDo(new Computable<List<Tools>>() {
@@ -681,7 +682,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     Editor editor = getCompletionEditor();
     int findTargetFlags = TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED | TargetElementUtil.ELEMENT_NAME_ACCEPTED;
     PsiElement element = TargetElementUtil.findTargetElement(editor, findTargetFlags);
-    
+
     // if no references found in injected fragment, try outer document
     if (element == null && editor instanceof EditorWindow) {
       element = TargetElementUtil.findTargetElement(((EditorWindow)editor).getDelegate(), findTargetFlags);
@@ -1485,9 +1486,9 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     return collectAndCheckHighlighting(checkWarnings, checkInfos, checkWeakWarnings, false);
   }
   
-  private long collectAndCheckHighlighting(boolean checkWarnings, boolean checkInfos, boolean checkWeakWarnings, 
+  private long collectAndCheckHighlighting(boolean checkWarnings, boolean checkInfos, boolean checkWeakWarnings,
                                            boolean ignoreExtraHighlighting) throws Exception {
-    ExpectedHighlightingData data = new ExpectedHighlightingData(myEditor.getDocument(), 
+    ExpectedHighlightingData data = new ExpectedHighlightingData(myEditor.getDocument(),
                                                                  checkWarnings, checkWeakWarnings, checkInfos, ignoreExtraHighlighting, getHostFile());
     data.init();
     return collectAndCheckHighlighting(data);
@@ -1510,7 +1511,11 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     }
 
     final long start = System.currentTimeMillis();
-    ((PsiManagerImpl)PsiManager.getInstance(project)).setAssertOnFileLoadingFilter(myJavaFilesFilter, myTestRootDisposable);
+    final VirtualFileFilter fileTreeAccessFilter = myVirtualFileFilter;
+    Disposable disposable = Disposer.newDisposable();
+    if (fileTreeAccessFilter != null) {
+      ((PsiManagerImpl)PsiManager.getInstance(project)).setAssertOnFileLoadingFilter(fileTreeAccessFilter, disposable);
+    }
 
     //    ProfilingUtil.startCPUProfiling();
     List<HighlightInfo> infos;
@@ -1519,7 +1524,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
       removeDuplicatedRangesForInjected(infos);
     }
     finally {
-      ((PsiManagerImpl)PsiManager.getInstance(project)).setAssertOnFileLoadingFilter(VirtualFileFilter.NONE, myTestRootDisposable);
+      Disposer.dispose(disposable);
     }
     //    ProfilingUtil.captureCPUSnapshot("testing");
     final long elapsed = System.currentTimeMillis() - start;
@@ -1529,10 +1534,14 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     return elapsed;
   }
 
+  public void setVirtualFileFilter(@Nullable VirtualFileFilter filter) {
+    myVirtualFileFilter = filter;
+  }
+
   private static void removeDuplicatedRangesForInjected(@NotNull List<HighlightInfo> infos) {
     Collections.sort(infos, new Comparator<HighlightInfo>() {
       @Override
-      public int compare(HighlightInfo o1, HighlightInfo o2) {
+      public int compare(@NotNull HighlightInfo o1, @NotNull HighlightInfo o2) {
         final int i = o2.startOffset - o1.startOffset;
         return i != 0 ? i : o1.getSeverity().myVal - o2.getSeverity().myVal;
       }
@@ -1669,10 +1678,10 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     final int fileOffset = editor.getCaretModel().getOffset();
     PsiElement hostElement = file.getViewProvider().findElementAt(fileOffset, file.getLanguage());
     PsiElement injectedElement = InjectedLanguageUtil.findElementAtNoCommit(file, fileOffset);
-    
+
     PsiFile injectedFile = injectedElement != null ? injectedElement.getContainingFile() : null;
     Editor injectedEditor = InjectedLanguageUtil.getInjectedEditorForInjectedFile(editor, injectedFile);
-    
+
     List<IntentionAction> result = new ArrayList<IntentionAction>();
 
     List<HighlightInfo> infos = DaemonCodeAnalyzerEx.getInstanceEx(file.getProject()).getFileLevelHighlights(file.getProject(), file);
@@ -1680,9 +1689,10 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
       for (Pair<HighlightInfo.IntentionActionDescriptor, TextRange> pair : info.quickFixActionRanges) {
         HighlightInfo.IntentionActionDescriptor actionInGroup = pair.first;
         final IntentionAction action = actionInGroup.getAction();
-        
+
         if (ShowIntentionActionsHandler.availableFor(file, editor, action)
-          || (injectedElement != null && hostElement != injectedElement && ShowIntentionActionsHandler.availableFor(injectedFile, injectedEditor, action))) {
+            ||
+            injectedElement != null && hostElement != injectedElement && ShowIntentionActionsHandler.availableFor(injectedFile, injectedEditor, action)) {
           descriptors.add(actionInGroup);
         }
       }
@@ -1691,7 +1701,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     // add all intention options for simplicity
     for (HighlightInfo.IntentionActionDescriptor descriptor : descriptors) {
       result.add(descriptor.getAction());
-      
+
       if (injectedElement != null && injectedElement != hostElement) {
         List<IntentionAction> options = descriptor.getOptions(injectedElement, injectedEditor);
         if (options != null) {
@@ -1702,7 +1712,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
           }
         }
       }
-      
+
       if (hostElement != null) {
         List<IntentionAction> options = descriptor.getOptions(hostElement, editor);
         if (options != null) {
@@ -1719,21 +1729,23 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
 
   @Override
   public void allowTreeAccessForFile(@NotNull final VirtualFile file) {
-    myJavaFilesFilter.allowTreeAccessForFile(file);
+    assert myVirtualFileFilter instanceof FileTreeAccessFilter : "configured filter does not support this method";
+    ((FileTreeAccessFilter)myVirtualFileFilter).allowTreeAccessForFile(file);
   }
 
   @Override
   public void allowTreeAccessForAllFiles() {
-    myJavaFilesFilter.allowTreeAccessForAllFiles();
+    assert myVirtualFileFilter instanceof FileTreeAccessFilter : "configured filter does not support this method";
+    ((FileTreeAccessFilter)myVirtualFileFilter).allowTreeAccessForAllFiles();
   }
 
   private static class SelectionAndCaretMarkupLoader {
-    final String filePath;
-    final String newFileText;
-    final EditorTestUtil.CaretAndSelectionState caretState;
+    private final String filePath;
+    private final String newFileText;
+    private final EditorTestUtil.CaretAndSelectionState caretState;
 
     @NotNull
-    static SelectionAndCaretMarkupLoader fromFile(@NotNull String path, String charset) throws IOException {
+    private static SelectionAndCaretMarkupLoader fromFile(@NotNull String path, String charset) throws IOException {
       return new SelectionAndCaretMarkupLoader(StringUtil.convertLineSeparators(FileUtil.loadFile(new File(path), charset)), path);
     }
 
@@ -1837,12 +1849,12 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
   private static final String END_FOLD = "</fold>";
 
   private static class Border implements Comparable<Border> {
-    public static final boolean LEFT = true;
-    public static final boolean RIGHT = false;
-    public boolean mySide;
-    public int myOffset;
-    public String myText;
-    public boolean myIsExpanded;
+    private static final boolean LEFT = true;
+    private static final boolean RIGHT = false;
+    private final boolean mySide;
+    private final int myOffset;
+    private final String myText;
+    private final boolean myIsExpanded;
 
     private Border(boolean side, int offset, String text, boolean isExpanded) {
       mySide = side;

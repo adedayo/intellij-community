@@ -29,7 +29,6 @@ import com.intellij.util.PathUtilRt;
 import com.intellij.util.ReflectionUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.messages.MessageBus;
 import gnu.trove.THashMap;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -82,6 +81,11 @@ public abstract class StateStorageManagerImpl implements StateStorageManager, Di
     myMacros.put(macro, expansion);
   }
 
+  @Nullable
+  protected final String getMacrosValue(@NotNull String macro) {
+    return myMacros.get(macro);
+  }
+
   @Override
   @NotNull
   public StateStorage getStateStorage(@NotNull Storage storageSpec) {
@@ -91,7 +95,7 @@ public abstract class StateStorageManagerImpl implements StateStorageManager, Di
     try {
       StateStorage stateStorage = myStorages.get(key);
       if (stateStorage == null) {
-        stateStorage = createStateStorage(storageSpec);
+        stateStorage = createStateStorage(storageSpec.storageClass(), storageSpec.file(), storageSpec.roamingType(), storageSpec.stateSplitter());
         myStorages.put(key, stateStorage);
       }
       return stateStorage;
@@ -161,21 +165,11 @@ public abstract class StateStorageManagerImpl implements StateStorageManager, Di
     }
   }
 
-  @SuppressWarnings("deprecation")
-  @NotNull
-  private StateStorage createStateStorage(Storage storageSpec) {
-    Class<? extends StateStorage> storageClass = storageSpec.storageClass();
-    String fileSpec = storageSpec.file();
-    RoamingType roamingType = storageSpec.roamingType();
-    Class<? extends StateSplitter> stateSplitter = storageSpec.stateSplitter();
-    return createStateStorage(storageClass, fileSpec, roamingType, stateSplitter);
-  }
-
   // overridden in upsource
   protected StateStorage createStateStorage(@NotNull Class<? extends StateStorage> storageClass,
                                             @NotNull String fileSpec,
                                             @NotNull RoamingType roamingType,
-                                            @NotNull Class<? extends StateSplitter> stateSplitter) {
+                                            @SuppressWarnings("deprecation") @NotNull Class<? extends StateSplitter> stateSplitter) {
     if (!storageClass.equals(StateStorage.class)) {
       String key = UUID.randomUUID().toString();
       ((MutablePicoContainer)myPicoContainer).registerComponentImplementation(key, storageClass);
@@ -184,7 +178,9 @@ public abstract class StateStorageManagerImpl implements StateStorageManager, Di
     final String filePath = expandMacros(fileSpec);
     File file = new File(filePath).getAbsoluteFile();
 
+    //noinspection deprecation
     if (!stateSplitter.equals(StateSplitter.class) && !stateSplitter.equals(StateSplitterEx.class)) {
+      @SuppressWarnings("deprecation")
       StateSplitter splitter = ReflectionUtil.newInstance(stateSplitter);
       return new DirectoryBasedStorage(myPathMacroSubstitutor, file, splitter, this, createStorageTopicListener());
     }
@@ -227,8 +223,7 @@ public abstract class StateStorageManagerImpl implements StateStorageManager, Di
 
   @Nullable
   protected StateStorage.Listener createStorageTopicListener() {
-    MessageBus messageBus = (MessageBus)myPicoContainer.getComponentInstanceOfType(MessageBus.class);
-    return messageBus == null ? null : messageBus.syncPublisher(StateStorage.STORAGE_TOPIC);
+    return null;
   }
 
   protected boolean isUseXmlProlog() {
@@ -244,7 +239,7 @@ public abstract class StateStorageManagerImpl implements StateStorageManager, Di
     return myStreamProvider;
   }
 
-  protected TrackingPathMacroSubstitutor getMacroSubstitutor(@NotNull final String fileSpec) {
+  protected TrackingPathMacroSubstitutor getMacroSubstitutor(@NotNull String fileSpec) {
     return myPathMacroSubstitutor;
   }
 

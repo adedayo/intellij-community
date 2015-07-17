@@ -36,6 +36,7 @@ import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -76,6 +77,7 @@ public class ProjectImpl extends PlatformComponentManagerImpl implements Project
   public boolean myOptimiseTestLoadSpeed;
   private String myName;
   private String myOldName;
+  private final boolean myLight;
 
   protected ProjectImpl(@NotNull ProjectManager projectManager,
                         @NotNull String filePath,
@@ -98,6 +100,9 @@ public class ProjectImpl extends PlatformComponentManagerImpl implements Project
     if (!isDefault() && projectName != null && getStateStore().getStorageScheme().equals(StorageScheme.DIRECTORY_BASED)) {
       myOldName = "";  // new project
     }
+    
+    // light project may be changed later during test, so we need to remember its initial state 
+    myLight = ApplicationManager.getApplication().isUnitTestMode() && filePath.contains("light_temp_");
   }
 
   @Override
@@ -105,9 +110,14 @@ public class ProjectImpl extends PlatformComponentManagerImpl implements Project
     return super.isDisposed() || temporarilyDisposed;
   }
 
+  @TestOnly
+  boolean isLight() {
+    return myLight;
+  }
+
   private volatile boolean temporarilyDisposed;
   @TestOnly
-  public void setTemporarilyDisposed(boolean disposed) {
+  void setTemporarilyDisposed(boolean disposed) {
     temporarilyDisposed = disposed;
   }
 
@@ -115,7 +125,6 @@ public class ProjectImpl extends PlatformComponentManagerImpl implements Project
   boolean isTemporarilyDisposed() {
     return temporarilyDisposed;
   }
-
 
   @Override
   public void setProjectName(@NotNull String projectName) {
@@ -146,16 +155,16 @@ public class ProjectImpl extends PlatformComponentManagerImpl implements Project
     final ProjectStoreClassProvider projectStoreClassProvider =
       (ProjectStoreClassProvider)picoContainer.getComponentInstanceOfType(ProjectStoreClassProvider.class);
 
-    picoContainer.registerComponentImplementation(ProjectPathMacroManager.class);
+    picoContainer.registerComponentImplementation(PathMacroManager.class, ProjectPathMacroManager.class);
     picoContainer.registerComponent(new ComponentAdapter() {
       private ComponentAdapter myDelegate;
 
+      @NotNull
       private ComponentAdapter getDelegate() {
         if (myDelegate == null) {
-          final Class storeClass = projectStoreClassProvider.getProjectStoreClass(isDefault());
+          Class storeClass = projectStoreClassProvider.getProjectStoreClass(isDefault());
           myDelegate = new ConstructorInjectionComponentAdapter(storeClass, storeClass, null, true);
         }
-
         return myDelegate;
       }
 
@@ -196,7 +205,7 @@ public class ProjectImpl extends PlatformComponentManagerImpl implements Project
   @Override
   public void initializeComponent(@NotNull Object component, boolean service) {
     if (!service) {
-      ProgressIndicator indicator = getProgressIndicator();
+      ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
       if (indicator != null) {
   //      indicator.setText2(getComponentName(component));
         indicator.setIndeterminate(false);

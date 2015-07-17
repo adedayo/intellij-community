@@ -3,7 +3,11 @@ package com.jetbrains.edu.learning.ui;
 import com.intellij.facet.ui.FacetValidatorsManager;
 import com.intellij.facet.ui.ValidationResult;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.fileChooser.FileChooser;
+import com.intellij.openapi.fileChooser.FileChooserDescriptor;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.HideableDecorator;
+import com.intellij.util.Consumer;
 import com.jetbrains.edu.courseFormat.Course;
 import com.jetbrains.edu.learning.StudyUtils;
 import com.jetbrains.edu.learning.courseGeneration.StudyProjectGenerator;
@@ -24,11 +28,11 @@ import java.util.List;
 public class StudyNewProjectPanel{
   private final HideableDecorator myDecorator;
   private List<CourseInfo> myAvailableCourses = new ArrayList<CourseInfo>();
+  private JButton myBrowseButton;
   private JComboBox myCoursesComboBox;
   private JButton myRefreshButton;
   private JPanel myContentPanel;
   private JLabel myAuthorLabel;
-  private JLabel myDescriptionLabel;
   private JLabel myLabel;
   private JPanel myInfoPanel;
   private JPanel myHideablePanel;
@@ -36,6 +40,7 @@ public class StudyNewProjectPanel{
   private JPasswordField myPasswordField;
   private JTextField myLoginField;
   private JButton myLogInButton;
+  private JTextPane myDescriptionLabel;
   private final StudyProjectGenerator myGenerator;
   private static final String CONNECTION_ERROR = "<html>Failed to download courses.<br>Check your Internet connection.</html>";
   private static final String INVALID_COURSE = "Selected course is invalid";
@@ -69,6 +74,48 @@ public class StudyNewProjectPanel{
   }
 
   private void initListeners() {
+    final FileChooserDescriptor fileChooser = new FileChooserDescriptor(true, false, false, true, false, false) {
+      @Override
+      public boolean isFileVisible(VirtualFile file, boolean showHiddenFiles) {
+        return file.isDirectory() || StudyUtils.isZip(file.getName());
+      }
+
+      @Override
+      public boolean isFileSelectable(VirtualFile file) {
+        return StudyUtils.isZip(file.getName());
+      }
+    };
+    myBrowseButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        FileChooser.chooseFile(fileChooser, null, null,
+                               new Consumer<VirtualFile>() {
+                                 @Override
+                                 public void consume(VirtualFile file) {
+                                   String fileName = file.getPath();
+                                   int oldSize = myAvailableCourses.size();
+                                   CourseInfo courseInfo = myGenerator.addLocalCourse(fileName);
+                                   if (courseInfo != null) {
+                                     if (oldSize != myAvailableCourses.size()) {
+                                       myCoursesComboBox.addItem(courseInfo);
+                                     }
+                                     myCoursesComboBox.setSelectedItem(courseInfo);
+                                     setOK();
+                                   }
+                                   else {
+                                     setError(INVALID_COURSE);
+                                     myCoursesComboBox.removeAllItems();
+                                     myCoursesComboBox.addItem(CourseInfo.INVALID_COURSE);
+                                     for (CourseInfo course : myAvailableCourses) {
+                                       myCoursesComboBox.addItem(course);
+                                     }
+                                     myCoursesComboBox.setSelectedItem(CourseInfo.INVALID_COURSE);
+                                   }
+                                 }
+                               });
+      }
+    });
+
     myRefreshButton.addActionListener(new RefreshActionListener());
     myCoursesComboBox.addActionListener(new CourseSelectedListener());
     myLogInButton.addActionListener(new ActionListener() {

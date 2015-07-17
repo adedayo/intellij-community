@@ -51,6 +51,11 @@ public class MockProjectStore implements IProjectStore {
     throw new UnsupportedOperationException("Method reinitComponents is not yet implemented in " + getClass().getName());
   }
 
+  @Override
+  public boolean reinitComponent(@NotNull String componentName, @NotNull Set<StateStorage> changedStorages) {
+    return false;
+  }
+
   @NotNull
   @Override
   public Collection<String> getNotReloadableComponents(@NotNull Collection<String> componentNames) {
@@ -122,11 +127,6 @@ public class MockProjectStore implements IProjectStore {
   @Override
   public void initComponent(@NotNull Object component, final boolean service) {
     throw new UnsupportedOperationException("Method initComponent is not yet implemented in " + getClass().getName());
-  }
-
-  @Override
-  public void load() {
-    throw new UnsupportedOperationException("Method load is not yet implemented in " + getClass().getName());
   }
 
   @Override

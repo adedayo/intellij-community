@@ -118,17 +118,24 @@ public class PluginManagerCore {
 
   public static void loadDisabledPlugins(@NotNull String configPath, @NotNull Collection<String> disabledPlugins) {
     final File file = new File(configPath, DISABLED_PLUGINS_FILENAME);
+    List<String> requiredPlugins = StringUtil.split(System.getProperty("idea.required.plugins.id", ""), ",");
     if (file.isFile()) {
       try {
         BufferedReader reader = new BufferedReader(new FileReader(file));
         try {
           String id;
           while ((id = reader.readLine()) != null) {
-            disabledPlugins.add(id.trim());
+            id = id.trim();
+            if (!requiredPlugins.contains(id)) {
+              disabledPlugins.add(id);
+            }
           }
         }
         finally {
           reader.close();
+          if (!requiredPlugins.isEmpty()) {
+            savePluginsList(disabledPlugins, false, new File(PathManager.getConfigPath(), DISABLED_PLUGINS_FILENAME));
+          }
         }
       }
       catch (IOException ignored) { }

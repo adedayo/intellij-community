@@ -24,6 +24,8 @@ import com.intellij.openapi.MnemonicHelper;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
+import com.intellij.openapi.application.JBProtocolCommand;
+import com.intellij.openapi.application.JetBrainsProtocolHandler;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAwareAction;
@@ -50,6 +52,7 @@ import com.intellij.util.IconUtil;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.MouseEventAdapter;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -83,6 +86,12 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame {
       public void addNotify() {
         super.addNotify();
         rootPane.remove(getProxyComponent());
+        //noinspection SSBasedInspection
+        SwingUtilities.invokeLater(new Runnable() {
+          public void run() {
+            handleJetBrainsProtocolCommand();
+          }
+        });
       }
     };
 
@@ -122,6 +131,18 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame {
         FlatWelcomeFrame.this.dispose();
       }
     });
+  }
+
+  private static void handleJetBrainsProtocolCommand() {
+    JBProtocolCommand command = JBProtocolCommand.findCommand(JetBrainsProtocolHandler.getCommand());
+    if (command != null) {
+      try {
+        command.perform(JetBrainsProtocolHandler.getMainParameter(), JetBrainsProtocolHandler.getParameters());
+      }
+      finally {
+        JetBrainsProtocolHandler.clear();
+      }
+    }
   }
 
   @Override
@@ -605,8 +626,7 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame {
     new ClickListener() {
       @Override
       public boolean onClick(@NotNull MouseEvent e, int clickCount) {
-        final MouseEvent newEvent = new MouseEvent(link, e.getID(), e.getWhen(), e.getModifiers(), e.getX(), e.getY(), e.getClickCount(),
-                                                   e.isPopupTrigger(), e.getButton());
+        final MouseEvent newEvent = MouseEventAdapter.convert(e, link, e.getX(), e.getY());
         link.doClick(newEvent);
         return true;
       }
@@ -712,6 +732,11 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame {
     ListSelectionListener selectionListener = new ListSelectionListener() {
       @Override
       public void valueChanged(ListSelectionEvent e) {
+        if (e.getValueIsAdjusting()) {
+          // Update when a change has been finalized.
+          // For instance, selecting an element with mouse fires two consecutive ListSelectionEvent events.
+          return;
+        }
         if (!selected.isNull()) {
           main.remove(selected.get());
         }

@@ -16,7 +16,6 @@
 package com.intellij.psi.impl.source.codeStyle;
 
 import com.intellij.openapi.components.RoamingType;
-import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.options.BaseSchemeProcessor;
 import com.intellij.openapi.options.SchemesManager;
 import com.intellij.openapi.options.SchemesManagerFactory;
@@ -35,9 +34,7 @@ public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes {
   protected static final String DEFAULT_SCHEME_NAME = "Default";
 
   @NonNls
-  static final String CODE_STYLES_DIR_PATH = StoragePathMacros.ROOT_CONFIG + "/codestyles";
-
-  public String CURRENT_SCHEME_NAME = DEFAULT_SCHEME_NAME;
+  static final String CODE_STYLES_DIR_PATH = "codestyles";
 
   protected final SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> mySchemesManager;
 
@@ -87,9 +84,7 @@ public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes {
 
   @Override
   public void setCurrentScheme(CodeStyleScheme scheme) {
-    String schemeName = scheme == null ? null : scheme.getName();
-    mySchemesManager.setCurrentSchemeName(schemeName);
-    CURRENT_SCHEME_NAME = schemeName;
+    mySchemesManager.setCurrent(scheme);
   }
 
   @SuppressWarnings("ForLoopThatDoesntUseLoopVariable")
@@ -138,6 +133,11 @@ public abstract class CodeStyleSchemesImpl extends CodeStyleSchemes {
   @Override
   public void setSchemes(@NotNull List<CodeStyleScheme> schemes) {
     mySchemesManager.setSchemes(schemes);
+  }
+
+  @NotNull
+  public SchemesManager<CodeStyleScheme, CodeStyleSchemeImpl> getSchemeManager() {
+    return mySchemesManager;
   }
 
   @Override

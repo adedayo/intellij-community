@@ -53,27 +53,26 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
 import com.intellij.openapi.module.EmptyModuleType;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.project.ModuleAdapter;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.project.ex.ProjectEx;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.project.impl.ProjectManagerImpl;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.ShutDownTracker;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.openapi.vfs.encoding.EncodingManagerImpl;
-import com.intellij.openapi.vfs.ex.temp.TempFileSystem;
 import com.intellij.openapi.vfs.impl.VirtualFilePointerManagerImpl;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl;
@@ -93,18 +92,17 @@ import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.psi.templateLanguages.TemplateDataLanguageMappings;
 import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl;
-import com.intellij.util.Consumer;
-import com.intellij.util.GCUtil;import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.GCUtil;
+import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.LocalTimeCounter;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.indexing.FileBasedIndex;
-import com.intellij.util.indexing.IndexableFileSet;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.THashMap;
 import junit.framework.TestCase;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
@@ -118,8 +116,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static com.intellij.openapi.roots.ModuleRootModificationUtil.updateModel;
 
 /**
  * @author yole
@@ -159,6 +155,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   /**
    * Shortcut to PsiManager.getInstance(getProject())
    */
+  @NotNull
   public static PsiManager getPsiManager() {
     if (ourPsiManager == null) {
       ourPsiManager = PsiManager.getInstance(ourProject);
@@ -166,6 +163,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return ourPsiManager;
   }
 
+  @NotNull
   public static IdeaTestApplication initApplication() {
     ourApplication = IdeaTestApplication.getInstance(null);
     return ourApplication;
@@ -210,7 +208,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     resetClassFields(getClass());
   }
 
-  private void resetClassFields(final Class<?> aClass) {
+  private void resetClassFields(@NotNull Class<?> aClass) {
     try {
       UsefulTestCase.clearDeclaredFields(this, aClass);
     }
@@ -224,11 +222,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
 
   private static void cleanPersistedVFSContent() {
     ((PersistentFSImpl)PersistentFS.getInstance()).cleanPersistedContents();
-  }
-
-  public static boolean isLight(Project project) {
-    String creationPlace = project.getUserData(CREATION_PLACE);
-    return creationPlace != null && StringUtil.startsWith(creationPlace, LIGHT_PROJECT_MARK);
   }
 
   private static void initProject(@NotNull final LightProjectDescriptor descriptor) throws Exception {
@@ -259,65 +252,10 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
           registerShutdownHook();
         }
         ourPsiManager = null;
-        ourModule = createMainModule(descriptor.getModuleType());
 
-        VirtualFile dummyRoot = VirtualFileManager.getInstance().findFileByUrl("temp:///");
-        assert dummyRoot != null;
-        dummyRoot.refresh(false, false);
-
-        try {
-          ourSourceRoot = dummyRoot.createChildDirectory(this, "src");
-          cleanSourceRoot();
-        }
-        catch (IOException e) {
-          throw new RuntimeException(e);
-        }
-
-        FileBasedIndex.getInstance().registerIndexableSet(new IndexableFileSet() {
-          @Override
-          public boolean isInSet(@NotNull final VirtualFile file) {
-            return ourSourceRoot != null &&
-                   file.getFileSystem() == ourSourceRoot.getFileSystem() &&
-                   ourProject != null &&
-                   ourProject.isOpen();
-          }
-
-          @Override
-          public void iterateIndexableFilesIn(@NotNull final VirtualFile file, @NotNull final ContentIterator iterator) {
-            VfsUtilCore.visitChildrenRecursively(file, new VirtualFileVisitor() {
-              @Override
-              public boolean visitFile(@NotNull VirtualFile file) {
-                iterator.processFile(file);
-                return true;
-              }
-            });
-          }
-        }, null);
-
-        updateModel(ourModule, new Consumer<ModifiableRootModel>() {
-          @Override
-          public void consume(ModifiableRootModel model) {
-            final Sdk sdk = descriptor.getSdk();
-            if (sdk != null) {
-              model.setSdk(sdk);
-            }
-
-            ContentEntry contentEntry = model.addContentEntry(ourSourceRoot);
-            contentEntry.addSourceFolder(ourSourceRoot, false);
-
-            descriptor.configureModule(ourModule, model, contentEntry);
-          }
-        });
-      }
-
-      private void cleanSourceRoot() throws IOException {
-        TempFileSystem tempFs = (TempFileSystem)ourSourceRoot.getFileSystem();
-        for (VirtualFile child : ourSourceRoot.getChildren()) {
-          if (!tempFs.exists(child)) {
-            tempFs.createChildFile(this, ourSourceRoot, child.getName());
-          }
-          child.delete(this);
-        }
+        LightProjectDescriptor.ProjectInfo projectInfo = ourProjectDescriptor.setUpProject(ourProject);
+        ourModule = projectInfo.module;
+        ourSourceRoot = projectInfo.moduleSourcesRoot;
       }
     }.execute().throwException();
 
@@ -325,14 +263,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     ((VirtualFilePointerManagerImpl)VirtualFilePointerManager.getInstance()).storePointers();
   }
 
-  protected static Module createMainModule(final ModuleType moduleType) {
-    return ApplicationManager.getApplication().runWriteAction(new Computable<Module>() {
-      @Override
-      public Module compute() {
-        return ModuleManager.getInstance(ourProject).newModule("light_idea_test_case.iml", moduleType.getId());
-      }
-    });
-  }
 
   /**
    * @return The only source root
@@ -514,7 +444,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     damage.throwIfNotEmpty();
   }
 
-  public static void doTearDown(@NotNull final Project project, IdeaTestApplication application, boolean checkForEditors) throws Exception {
+  public static void doTearDown(@NotNull final Project project, @NotNull IdeaTestApplication application, boolean checkForEditors) throws Exception {
     ((FileTypeManagerImpl)FileTypeManager.getInstance()).drainReDetectQueue();
     DocumentCommitThread.getInstance().clearQueue();
     CodeStyleSettingsManager.getInstance(project).dropTemporarySettings();
@@ -598,7 +528,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     }
   }
   
-  private static int ourTestCount = 0;
+  private static int ourTestCount;
 
   public static PsiDocumentManagerImpl clearUncommittedDocuments(@NotNull Project project) {
     PsiDocumentManagerImpl documentManager = (PsiDocumentManagerImpl)PsiDocumentManager.getInstance(project);
@@ -712,6 +642,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return null;
   }
 
+  @NotNull
   protected ModuleType getModuleType() {
     return EmptyModuleType.getInstance();
   }
@@ -727,13 +658,15 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
    * @throws IncorrectOperationException
    *
    */
-  protected static PsiFile createFile(@NonNls String fileName, @NonNls String text) throws IncorrectOperationException {
+  @NotNull
+  protected static PsiFile createFile(@NonNls @NotNull String fileName, @NonNls @NotNull String text) throws IncorrectOperationException {
     FileType fileType = FileTypeManager.getInstance().getFileTypeByFileName(fileName);
     return PsiFileFactory.getInstance(getProject())
       .createFileFromText(fileName, fileType, text, LocalTimeCounter.currentTime(), true, false);
   }
 
-  protected static PsiFile createLightFile(@NonNls String fileName, String text) throws IncorrectOperationException {
+  @NotNull
+  protected static PsiFile createLightFile(@NonNls @NotNull String fileName, @NotNull String text) throws IncorrectOperationException {
     FileType fileType = FileTypeManager.getInstance().getFileTypeByFileName(fileName);
     return PsiFileFactory.getInstance(getProject())
       .createFileFromText(fileName, fileType, text, LocalTimeCounter.currentTime(), false, false);
@@ -755,7 +688,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return name;
   }
 
-  protected static void commitDocument(final Document document) {
+  protected static void commitDocument(@NotNull Document document) {
     PsiDocumentManager.getInstance(getProject()).commitDocument(document);
   }
 
@@ -769,7 +702,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return CodeStyleSettingsManager.getSettings(getProject());
   }
 
-  protected static Document getDocument(final PsiFile file) {
+  protected static Document getDocument(@NotNull PsiFile file) {
     return PsiDocumentManager.getInstance(getProject()).getDocument(file);
   }
 
@@ -779,7 +712,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       ApplicationManager.getApplication().assertWriteAccessAllowed();
 
       if (!ourProject.isDisposed()) {
-        VirtualFile projectFile = ((ProjectEx)ourProject).getStateStore().getProjectFile();
+        VirtualFile projectFile = ourProject.getProjectFile();
         File ioFile = projectFile == null ? null : VfsUtilCore.virtualToIoFile(projectFile);
         Disposer.dispose(ourProject);
         if (ioFile != null) {
@@ -819,27 +752,25 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     });
   }
 
-  private static class SimpleLightProjectDescriptor implements LightProjectDescriptor {
-    private final ModuleType myModuleType;
-    private final Sdk mySdk;
+  private static class SimpleLightProjectDescriptor extends LightProjectDescriptor {
+    @NotNull private final ModuleType myModuleType;
+    @Nullable private final Sdk mySdk;
 
-    SimpleLightProjectDescriptor(ModuleType moduleType, Sdk sdk) {
+    SimpleLightProjectDescriptor(@NotNull ModuleType moduleType, @Nullable Sdk sdk) {
       myModuleType = moduleType;
       mySdk = sdk;
     }
 
+    @NotNull
     @Override
     public ModuleType getModuleType() {
       return myModuleType;
     }
 
+    @Nullable 
     @Override
     public Sdk getSdk() {
       return mySdk;
-    }
-
-    @Override
-    public void configureModule(Module module, ModifiableRootModel model, ContentEntry contentEntry) {
     }
 
     @Override
@@ -849,13 +780,13 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
 
       SimpleLightProjectDescriptor that = (SimpleLightProjectDescriptor)o;
 
-      if (myModuleType != null ? !myModuleType.equals(that.myModuleType) : that.myModuleType != null) return false;
+      if (!myModuleType.equals(that.myModuleType)) return false;
       return areJdksEqual(that.getSdk());
     }
 
     @Override
     public int hashCode() {
-      return myModuleType != null ? myModuleType.hashCode() : 0;
+      return myModuleType.hashCode();
     }
 
     private boolean areJdksEqual(final Sdk newSdk) {

@@ -13,7 +13,7 @@ import java.util.*;
  * User: anna
  * Date: 5/22/13
  */
-public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener{
+public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener, IInvokedMethodListener {
 
   private final PrintStream myPrintStream;
   private final List<String> myCurrentSuites = new ArrayList<String>();
@@ -35,7 +35,7 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
       if (allMethods != null) {
         int count = 0;
         for (ITestNGMethod method : allMethods) {
-          if (method.isTest()) count++;
+          if (method.isTest()) count += method.getInvocationCount();
         }
         myPrintStream.println("##teamcity[testCount count = \'" + count + "\']");
       }
@@ -44,11 +44,39 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
   }
 
   public synchronized void onFinish(ISuite suite) {
+    if (suite != null && suite.getAllInvokedMethods().size() < suite.getAllMethods().size()) {
+      for (ITestNGMethod method : suite.getAllMethods()) {
+        if (method.isTest()) {
+          boolean found = false;
+          for (IInvokedMethod invokedMethod : suite.getAllInvokedMethods()) {
+            if (invokedMethod.getTestMethod() == method) {
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            final String fullEscapedMethodName = escapeName(getShortName(method.getTestClass().getName()) + "." + method.getMethodName());
+            myPrintStream.println("##teamcity[testStarted name=\'" + fullEscapedMethodName + "\']");
+            myPrintStream.println("##teamcity[testIgnored name=\'" + fullEscapedMethodName + "\']");
+            myPrintStream.println("##teamcity[testFinished name=\'" + fullEscapedMethodName + "\']");
+            break;
+          }
+        }
+      }
+    }
     for (int i = myCurrentSuites.size() - 1; i >= 0; i--) {
       onSuiteFinish(myCurrentSuites.remove(i));
     }
     myCurrentSuites.clear();
   }
+
+  public synchronized void beforeInvocation(IInvokedMethod method, ITestResult testResult) {
+    if (!testResult.getMethod().isTest()) {
+      onConfigurationStart(new DelegatedResult(testResult));
+    }
+  }
+  //should be covered by test listeners
+  public void afterInvocation(IInvokedMethod method, ITestResult testResult) {}
 
   public synchronized void onConfigurationSuccess(ITestResult result) {
     onConfigurationSuccess(new DelegatedResult(result));
@@ -101,13 +129,15 @@ public class IDEATestNGRemoteListener implements ISuiteListener, IResultListener
     myInvocationCounts.put(qualifiedName, invocationCount + 1);
   }
 
-  public void onConfigurationSuccess(ExposedTestResult result) {
+  public void onConfigurationStart(ExposedTestResult result) {
     onTestStart(result, null, -1, true);
+  }
+
+  public void onConfigurationSuccess(ExposedTestResult result) {
     onTestFinished(result);
   }
 
   public void onConfigurationFailure(ExposedTestResult result) {
-    onTestStart(result, null, -1, true);
     onTestFailure(result);
   }
   
